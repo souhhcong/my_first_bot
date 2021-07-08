@@ -93,18 +93,20 @@ class Game:
         self.current_turn_Player().countdown()
     def check_word_validity(self, word: str):
         """check for a word validitiy according to the Shiritori's rule"""
-        if self.dict_type == 0:
+        if (self.current_letter != '' and word[0] != self.current_letter): # basic shiritori rule
+            return 0
+        if word in self.list_of_used_words: # basic shiritori rule
+            return 0
+
+        if self.dict_type == 0: # normal
             if ' ' in word:
                 return 0
             if any(not c.isalnum() for c in word):
                 return 0
-            if (self.current_letter != '' and word[0] != self.current_letter):
-                return 0
-            if word in self.list_of_used_words:
-                return 0
             temporary_dict = Dictionary.meaning(word)
             return temporary_dict is not None
-        elif self.dict_type == 1:
+
+        elif self.dict_type == 1: # urban
             response = requests.get("https://api.urbandictionary.com/v0/define?term=" + word).text
             dict_response = json.loads(response)
             
@@ -117,6 +119,21 @@ class Game:
 
             def_list = dict_response['list']
             return len(def_list) != 0
+
+        elif self.dict_type == 2: # MAL
+            uppercase_word = word.title()
+            full_name = uppercase_word.split(' ', 1)
+
+            formatted_name: str
+            if len(full_name) >= 2:
+                formatted_name = f'{full_name[0]}, {full_name[1]}' # full_name[0] is last name, full_name[1] is the rest of the name
+            else:
+                formatted_name = full_name[0]
+            print(formatted_name)
+            with open(f'character_names/{formatted_name[0]}.txt', encoding = 'utf-8') as f:
+                if formatted_name in f.read():
+                    return 1
+            return 0
 
     def find_player(self, name: str) -> bool:
         for gamer in self.list_of_players:
@@ -165,7 +182,7 @@ class Game:
 shiritori = Game()
 bot = commands.Bot(command_prefix = '&', intents = intents)
 
-@bot.command(name = 'create', help = "Create a blitz, bullet or casual shiritori game with different dictionary modes such as normal or urbandict")
+@bot.command(name = 'create', help = "Create a blitz, bullet or casual shiritori game with different dictionary modes", aliases = ['c'])
 async def create(ctx, game_type: str = None, dictionary_type: str = None):
     """create a game by selecting the game mode"""
     global DEFAULT_TIME
@@ -195,17 +212,19 @@ async def create(ctx, game_type: str = None, dictionary_type: str = None):
         DEFAULT_DICT_TYPE = 0
     elif dictionary_type == "urbandict":
         DEFAULT_DICT_TYPE = 1
+    elif dictionary_type == "MAL":
+        DEFAULT_DICT_TYPE = 2
     elif dictionary_type == None:
         embed_var = discord.Embed(
             title = f'{ctx.message.author} please select a dictionary mode!', 
-            description = "normal or urbandict", 
+            description = "normal, urbandict or MAL", 
             color = COLOR
         )
         await ctx.message.channel.send(embed = embed_var)
     else:
         embed_var = discord.Embed(
             title = f'Invalid dictionary mode. {ctx.message.author} please select again!', 
-            description = "normal or urbandict", 
+            description = "normal, urbandict or MAL", 
             color = COLOR
         )
         await ctx.message.channel.send(embed = embed_var)
@@ -227,7 +246,7 @@ async def create(ctx, game_type: str = None, dictionary_type: str = None):
     # print(f'debug checkpoint#1 {shiritori.state}')
 
    
-@bot.command(name = 'join')
+@bot.command(name = 'join', aliases = ['j'])
 async def join(ctx):
     """join the current game"""
     if shiritori.state == 2:
@@ -262,7 +281,7 @@ async def join(ctx):
     #print(f'debug checkpoint#2 {shiritori.state}')
 
 
-@bot.command(name = 'start')
+@bot.command(name = 'start', aliases = ['s'])
 async def start(ctx):
     """start the current game"""
     print(shiritori.dict_type)
@@ -274,6 +293,8 @@ async def start(ctx):
                 desc = f'The game is beginning. {shiritori.current_turn_Player().name} Please choose a random English word.'
             elif shiritori.dict_type == 1:
                 desc = f'The game is beginning. {shiritori.current_turn_Player().name} Please choose a random Urban Dictionary phrase.'
+            elif shiritori.dict_type == 2:
+                desc = f'The game is beginning. {shiritori.current_turn_Player().name} Please choose the full name of a random anime character.'
 
             embed_var = discord.Embed(
                 description = desc, 
@@ -359,8 +380,19 @@ async def on_message(message):
                         color = COLOR
                     ) 
                     await channel.send(embed = embed_var)
+                    
                     shiritori.kick(shiritori.current_turn_Player()) 
                     shiritori.next_turn()
+
+                    if shiritori.check_end():
+                        embed_var = discord.Embed(
+                            title = "Game ended!", 
+                            description = f'Congratulation {shiritori.get_winner().name}', 
+                            color = COLOR)
+                        await channel.send(embed = embed_var)
+                        shiritori.end()
+                        return
+
                     embed_var = discord.Embed(
                     description = f'{shiritori.current_turn_Player().name} your turn.' +
                     f'{"{:.2f}".format(shiritori.current_turn_Player().time_left)} seconds left.', 
@@ -452,6 +484,14 @@ async def urbanmean(ctx, word: str):
             color = COLOR
             )
             await ctx.send(embed = embed_var)
+
+@bot.command(name = 'anime', help = "return something related from MAL")
+async def anime(ctx):
+    url = "https://myanimelist.net/v1/oauth2/token"
+    myobj = {'client_id': '74abac7ec722300bd530a740edecc63c', 'grant_type' : 'authorization_code', 'code' : 'def5020086ec11a19e4aa6f5bf3250b6470f350f2971d16705ca40d2b4820242506e52df21ce213f7bccb3d61aa04941711c5a384d640c178b919df7a51e6e0fcb54a462024b102a0ac5c601695b464166b9b35e139a3de701e2d4b24a86408b21482b5c3368bbda0af87f8c40747daa88f6106f8155b7a805b835cb3ad15dc04b04a2a09a037079fd8d79921f3a2abce9259cc9b8cb9b1a98fd9f4d00204f49750a271552a792999485f4c26c0feca78d60ea0197f6592053060cd3deada978195c6715827a1b72315521f02ba5095b489c5a516af4f7d957045a75889f0ff4e90257ea4996a9c14a67b0539015eb01796a02efaa8c9c1d6ee9629bc749c4b1ee5144c150e19f9b7acce4cf25ff4255a9d87a6850c9d73e7ded37731a7f4a163e522341e1eda1bfb8ebc4f5d5f026bdd6e88acdd509e8311efb073ecc5a52b86623701d6e48fd1136a34994f4390eab5525c53947920fe7068f1fdb3ef67ca1ca745a25d19563ad050a1dc3ad48a2ff1259daf0153da98cf003c58d0aa4e2cd04fbaa28fe8480c34b9e937365e33af251216056', 'redirect_uri' : 'http://localhost:3000', 'code_verifier':'47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU'}
+    x = requests.post(url, data = myobj)
+
+    print(x.text)
 
         
 @bot.event
